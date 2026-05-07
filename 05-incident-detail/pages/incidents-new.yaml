@@ -160,7 +160,8 @@ blocks:
               flex: 0 0 auto
             properties:
               title: Open incident
-              type: primary
+              color: primary
+              variant: solid
             events:
               onClick:
                 # Validate required inputs. Validation failures halt the chain.
