@@ -1,0 +1,137 @@
+id: incidents
+type: PageHeaderMenu
+
+properties:
+  title: All incidents
+  darkModeToggle: true
+
+requests:
+  # One query for the whole list. AgGrid handles the filtering/sorting
+  # on the client once the rows land, so we don't need to re-query on
+  # filter changes — keeps the Lowdefy config small and snappy.
+  - id: fetch_all_incidents
+    type: KnexRaw
+    connectionId: incidents_db
+    properties:
+      query: |
+        SELECT id, title, description, service, severity, current_status, created_at, resolved_at
+        FROM incidents
+        ORDER BY created_at DESC
+
+events:
+  onMount:
+    - id: load_all
+      type: Request
+      params: fetch_all_incidents
+
+layout:
+  gap: 16
+  justify: center
+
+blocks:
+  - id: header_card
+    type: Card
+    layout:
+      size: 1200
+      gap: 8
+    properties:
+      size: small
+    blocks:
+      - id: page_title
+        type: Title
+        properties:
+          content: All incidents
+          level: 2
+      - id: page_subtitle
+        type: Paragraph
+        properties:
+          type: secondary
+          content: |
+            Every incident this tracker has seen. Click any row to open the detail view. Use the column filters to narrow by status or service.
+
+  # AgGrid gives us pagination, sorting, and per-column filters out
+  # of the box — no extra Lowdefy plumbing needed.
+  - id: grid
+    type: AgGridBalham
+    layout:
+      size: 1200
+    properties:
+      enableCellTextSelection: true
+      pagination: true
+      paginationPageSize: 20
+      rowData:
+        _request: fetch_all_incidents
+      defaultColDef:
+        sortable: true
+        resizable: true
+        filter: true
+      columnDefs:
+        - headerName: Title
+          field: title
+          width: 240
+        - headerName: Description
+          field: description
+          flex: 1
+          minWidth: 240
+          # Long descriptions ellipsis cleanly within a single row.
+          cellStyle:
+            whiteSpace: nowrap
+            overflow: hidden
+            textOverflow: ellipsis
+        - headerName: Service
+          field: service
+          width: 130
+          filter: agSetColumnFilter
+          cell:
+            type: tag
+            # Service tags share a single color — they're an identifier, not a state.
+            default: blue
+        - headerName: Severity
+          field: severity
+          width: 120
+          filter: agSetColumnFilter
+          cell:
+            type: tag
+            # Color map derived from config/severities.yaml so the grid
+            # uses the same colors as the cards. AgGrid wants a flat
+            # `{value: color}` map; the enum is `{value: {color, label}}`,
+            # so project it down to just the colors.
+            colorMap:
+              _jsonata:
+                on:
+                  _global: severities
+                expr: "$merge($each($, function($v, $k) { { $k: $v.color } }))"
+        - headerName: Status
+          field: current_status
+          width: 150
+          filter: agSetColumnFilter
+          cell:
+            type: tag
+            colorMap:
+              _jsonata:
+                on:
+                  _global: statuses
+                expr: "$merge($each($, function($v, $k) { { $k: $v.color } }))"
+        - headerName: Opened
+          field: created_at
+          width: 170
+          filter: false
+          cell:
+            type: date
+            format: DD MMM YYYY HH:mm
+        - headerName: Resolved
+          field: resolved_at
+          width: 170
+          filter: false
+          cell:
+            type: date
+            format: DD MMM YYYY HH:mm
+    events:
+      onRowClick:
+        - id: open_row
+          type: Link
+          params:
+            pageId: incident
+            urlQuery:
+              id:
+                _event: row.id

@@ -1,0 +1,12 @@
+# Severity enum, keyed by the value stored in the DB (matches the CHECK
+# constraint in schema.sql). The key IS the value — that lets pages look
+# up `<enum>.<incident.severity>.color` directly via the _get operator.
+minor:
+  label: Minor — cosmetic, single user, easily worked around
+  color: gold
+major:
+  label: Major — many users affected, no workaround
+  color: orange
+critical:
+  label: Critical — full outage, data at risk
+  color: red

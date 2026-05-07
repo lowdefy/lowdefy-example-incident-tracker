@@ -1,0 +1,51 @@
+lowdefy: 5.2.0
+name: Incident Tracker
+
+config:
+  homePageId: home
+
+global:
+  services:
+    _ref: config/services.yaml
+  severities:
+    _ref: config/severities.yaml
+  statuses:
+    _ref: config/statuses.yaml
+
+connections:
+  - id: incidents_db
+    type: Knex
+    properties:
+      client: better-sqlite3
+      connection:
+        filename:
+          _secret: SQLITE_FILENAME
+      useNullAsDefault: true
+
+menus:
+  - id: default
+    links:
+      - id: home_link
+        type: MenuLink
+        pageId: home
+        properties:
+          icon: AiOutlineHome
+          title: Status
+      - id: new_incident_link
+        type: MenuLink
+        pageId: incidents-new
+        properties:
+          icon: AiOutlinePlusCircle
+          title: New incident
+      - id: services_link
+        type: MenuLink
+        pageId: services
+        properties:
+          icon: AiOutlineAppstore
+          title: Services
+
+pages:
+  - _ref: pages/home.yaml
+  - _ref: pages/incidents-new.yaml
+  - _ref: pages/incident.yaml
+  - _ref: pages/services.yaml

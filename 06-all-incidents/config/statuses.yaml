@@ -1,0 +1,15 @@
+# Incident status enum, keyed by the value stored in the DB (matches the
+# CHECK constraint in schema.sql). incidents.current_status and
+# incident_updates.status share this same set.
+investigating:
+  label: Investigating — we're looking into it
+  color: volcano
+identified:
+  label: Identified — we know the cause
+  color: orange
+monitoring:
+  label: Monitoring — a fix is in place, watching
+  color: blue
+resolved:
+  label: Resolved — back to normal
+  color: green

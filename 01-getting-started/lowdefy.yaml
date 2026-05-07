@@ -1,0 +1,25 @@
+lowdefy: 5.2.0
+name: Incident Tracker
+
+config:
+  homePageId: home
+
+pages:
+  - id: home
+    type: PageHeaderMenu
+    properties:
+      title: Status
+    blocks:
+      - id: content_card
+        type: Card
+        layout:
+          size: 800
+        blocks:
+          - id: content
+            type: Result
+            properties:
+              title: Incident Tracker
+              subTitle: A self-hosted status page, built in YAML.
+              icon:
+                name: AiOutlineAlert
+                color: '#1890ff'

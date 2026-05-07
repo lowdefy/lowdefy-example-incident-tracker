@@ -1,0 +1,18 @@
+# Services tracked by this status page, keyed by slug. The key IS the
+# value stored in `incidents.service`. Add or remove a service by editing
+# this file — no DB migration required (the column is a free string).
+api:
+  name: Public API
+  description: REST and GraphQL endpoints at api.example.com
+web:
+  name: Web App
+  description: The marketing site and customer dashboard
+auth:
+  name: Authentication
+  description: Sign in, SSO, and session management
+db:
+  name: Primary Database
+  description: The main Postgres cluster that backs the product
+workers:
+  name: Background Workers
+  description: Email delivery, scheduled jobs, webhook fan-out

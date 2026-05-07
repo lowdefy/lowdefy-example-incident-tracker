@@ -1,0 +1,354 @@
+id: incident
+type: PageHeaderMenu
+
+properties:
+  title: Incident
+
+requests:
+  # Fetch the incident by the id in the URL (?id=...).
+  - id: fetch_incident
+    type: KnexRaw
+    connectionId: incidents_db
+    payload:
+      id:
+        _url_query: id
+    properties:
+      query: |
+        SELECT id, title, description, service, severity, current_status, created_at, resolved_at
+        FROM incidents
+        WHERE id = :id
+        LIMIT 1
+      parameters:
+        id:
+          _payload: id
+
+  # Fetch the full timeline of updates, newest first.
+  - id: fetch_updates
+    type: KnexRaw
+    connectionId: incidents_db
+    payload:
+      id:
+        _url_query: id
+    properties:
+      query: |
+        SELECT id, incident_id, status, message, created_at
+        FROM incident_updates
+        WHERE incident_id = :id
+        ORDER BY created_at DESC
+      parameters:
+        id:
+          _payload: id
+
+  # Insert a new update row.
+  - id: insert_update
+    type: KnexRaw
+    connectionId: incidents_db
+    payload:
+      update_id:
+        _uuid: true
+      incident_id:
+        _url_query: id
+      status:
+        _state: new_update_status
+      message:
+        _state: new_update_message
+    properties:
+      query: |
+        INSERT INTO incident_updates (id, incident_id, status, message, created_at)
+        VALUES (:id, :incident_id, :status, :message, datetime('now'))
+      parameters:
+        id:
+          _payload: update_id
+        incident_id:
+          _payload: incident_id
+        status:
+          _payload: status
+        message:
+          _payload: message
+
+  # Sync the denormalised current_status on the incident row. Setting
+  # status='resolved' also stamps resolved_at so the home page's 30-day
+  # filter picks it up. CASE handles the resolved-vs-not branching inline.
+  - id: update_incident_status
+    type: KnexRaw
+    connectionId: incidents_db
+    payload:
+      id:
+        _url_query: id
+      status:
+        _state: new_update_status
+    properties:
+      query: |
+        UPDATE incidents
+        SET current_status = :status,
+            resolved_at = CASE WHEN :status = 'resolved' THEN datetime('now') ELSE resolved_at END
+        WHERE id = :id
+      parameters:
+        id:
+          _payload: id
+        status:
+          _payload: status
+
+events:
+  onMount:
+    - id: load_incident
+      type: Request
+      params:
+        - fetch_incident
+        - fetch_updates
+    # Same shape as home.yaml: one Request, then one SetState that copies
+    # request results into state for the list block to iterate over.
+    - id: populate_state
+      type: SetState
+      params:
+        incident_updates:
+          _request: fetch_updates
+
+layout:
+  gap: 24
+  justify: center
+
+blocks:
+  # Header: title, tags, meta. The incident request returns [row], so we index [0].
+  - id: header_card
+    type: Card
+    layout:
+      size: 1000
+      gap: 12
+    properties:
+      size: small
+    blocks:
+      - id: header_title
+        type: Title
+        properties:
+          content:
+            _request: fetch_incident.0.title
+          level: 2
+
+      - id: header_tags
+        type: Box
+        layout:
+          gap: 8
+        blocks:
+          - id: header_service_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color: blue
+              title:
+                _request: fetch_incident.0.service
+          - id: header_severity_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color:
+                _global:
+                  _string.concat:
+                    - severities.
+                    - _request: fetch_incident.0.severity
+                    - .color
+              title:
+                _request: fetch_incident.0.severity
+          - id: header_status_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color:
+                _global:
+                  _string.concat:
+                    - statuses.
+                    - _request: fetch_incident.0.current_status
+                    - .color
+              title:
+                _request: fetch_incident.0.current_status
+
+      - id: header_meta
+        type: Paragraph
+        properties:
+          type: secondary
+          content:
+            _nunjucks:
+              on:
+                created:
+                  _request: fetch_incident.0.created_at
+                resolved:
+                  _request: fetch_incident.0.resolved_at
+              template: |
+                Opened {{ created | date('DD MMM YYYY HH:mm') }}{% if resolved %} — resolved {{ resolved | date('DD MMM YYYY HH:mm') }}{% endif %}
+
+      - id: header_description
+        type: Paragraph
+        properties:
+          content:
+            _request: fetch_incident.0.description
+
+  # Post-an-update form. Hidden once the incident is resolved.
+  - id: post_update_card
+    type: Card
+    visible:
+      _ne:
+        - _request: fetch_incident.0.current_status
+        - resolved
+    layout:
+      size: 1000
+      gap: 12
+    properties:
+      size: small
+    blocks:
+      - id: post_update_title
+        type: Title
+        properties:
+          content: Post an update
+          level: 4
+
+      - id: new_update_status
+        type: Selector
+        required: true
+        properties:
+          label:
+            title: Status
+          placeholder: What stage is this at?
+          options:
+            _jsonata:
+              on:
+                _global: statuses
+              expr: "$each($, function($v, $k) { { 'value': $k, 'label': $v.label } })"
+
+      - id: new_update_message
+        type: TextArea
+        required: true
+        properties:
+          label:
+            title: Message
+          placeholder: What happened? What did you do? What's next?
+          rows: 3
+
+      - id: post_update_actions
+        type: Box
+        layout:
+          justify: end
+          gap: 8
+        blocks:
+          - id: post_update_button
+            type: Button
+            layout:
+              flex: 0 0 auto
+            properties:
+              title: Post update
+              type: primary
+            events:
+              onClick:
+                - id: validate_update
+                  type: Validate
+                - id: save_update
+                  type: Request
+                  params: insert_update
+                - id: sync_status
+                  type: Request
+                  params: update_incident_status
+                - id: reset_form
+                  type: Reset
+                - id: reload_timeline
+                  type: Request
+                  params:
+                    - fetch_incident
+                    - fetch_updates
+                # Re-stash so the timeline picks up the new row.
+                - id: populate_state
+                  type: SetState
+                  params:
+                    incident_updates:
+                      _request: fetch_updates
+                - id: flash_update
+                  type: DisplayMessage
+                  params:
+                    type: success
+                    content: Update posted.
+
+  # Update history. MasonryList over the stashed incident updates,
+  # one column, so it reads like a vertical timeline.
+  - id: history_header
+    type: Title
+    layout:
+      size: 1000
+    properties:
+      content: Update history
+      level: 3
+
+  - id: history_empty
+    type: Paragraph
+    visible:
+      _eq:
+        - _jsonata:
+            on:
+              _state: incident_updates
+            expr: $count($)
+        - 0
+    layout:
+      size: 1000
+    properties:
+      type: secondary
+      content: No updates yet.
+
+  - id: incident_updates
+    type: MasonryList
+    visible:
+      _gt:
+        - _jsonata:
+            on:
+              _state: incident_updates
+            expr: $count($)
+        - 0
+    layout:
+      size: 1000
+    properties:
+      columns: 1
+      gutter: 12
+    blocks:
+      - id: incident_updates.$.card
+        type: Card
+        layout:
+          gap: [ 8, 6 ]
+        properties:
+          size: small
+        blocks:
+          - id: incident_updates.$.header_row
+            type: Box
+            layout:
+              justify: space-between
+              align: center
+              gap: 8
+            blocks:
+              - id: incident_updates.$.status_tag
+                type: Tag
+                layout:
+                  flex: 0 0 auto
+                properties:
+                  color:
+                    _global:
+                      _string.concat:
+                        - statuses.
+                        - _state: incident_updates.$.status
+                        - .color
+                  title:
+                    _state: incident_updates.$.status
+              - id: incident_updates.$.timestamp
+                type: Paragraph
+                layout:
+                  flex: 0 0 auto
+                properties:
+                  type: secondary
+                  content:
+                    _nunjucks:
+                      on:
+                        t:
+                          _state: incident_updates.$.created_at
+                      template: "{{ t | date('DD MMM YYYY HH:mm') }}"
+          - id: incident_updates.$.message
+            type: Paragraph
+            properties:
+              content:
+                _state: incident_updates.$.message
