@@ -1,0 +1,365 @@
+id: home
+type: PageHeaderMenu
+
+properties:
+  title: Status
+  darkModeToggle: true
+
+requests:
+  # Active incidents — anything not yet resolved, newest first.
+  - id: fetch_active
+    type: KnexRaw
+    connectionId: incidents_db
+    properties:
+      query: |
+        SELECT id, title, description, service, severity, current_status, created_at
+        FROM incidents
+        WHERE current_status != 'resolved'
+        ORDER BY created_at DESC
+
+  # Recently resolved — last 30 days, most recent first, capped for the landing view.
+  - id: fetch_recent_resolved
+    type: KnexRaw
+    connectionId: incidents_db
+    properties:
+      query: |
+        SELECT id, title, description, service, severity, resolved_at
+        FROM incidents
+        WHERE current_status = 'resolved'
+          AND resolved_at >= datetime('now', '-30 days')
+        ORDER BY resolved_at DESC
+        LIMIT 25
+
+events:
+  onMount:
+    - id: load_incidents
+      type: Request
+      params:
+        - fetch_active
+        - fetch_recent_resolved
+    # Stash fetched rows + the derived overall status in state so the UI
+    # reads plain values. The overall-status rule (from the scope):
+    #   any active incident with severity "critical"          → "down"
+    #   any active incident with severity "major" OR status "investigating" → "degraded"
+    #   otherwise                                              → "operational"
+    - id: populate_state
+      type: SetState
+      params:
+        active_incidents:
+          _request: fetch_active
+        recent_resolved:
+          _request: fetch_recent_resolved
+        overall_status:
+          _jsonata:
+            on:
+              _request: fetch_active
+            expr: |
+              $exists($[severity = 'critical'])
+                ? 'down'
+                : ($exists($[severity = 'major' or current_status = 'investigating'])
+                  ? 'degraded'
+                  : 'operational')
+
+layout:
+  gap: 24
+  justify: center
+
+blocks:
+  # Overall status banner.
+  - id: status_banner
+    type: Alert
+    layout:
+      size: 1000
+    properties:
+      showIcon: true
+      type:
+        _switch:
+          branches:
+            - if:
+                _eq:
+                  - _state: overall_status
+                  - down
+              then: error
+            - if:
+                _eq:
+                  - _state: overall_status
+                  - degraded
+              then: warning
+          default: success
+      message:
+        _switch:
+          branches:
+            - if:
+                _eq:
+                  - _state: overall_status
+                  - down
+              then: Major outage
+            - if:
+                _eq:
+                  - _state: overall_status
+                  - degraded
+              then: Degraded performance
+          default: All systems operational
+      description:
+        _if:
+          test:
+            _eq:
+              - _jsonata:
+                  on:
+                    _state: active_incidents
+                  expr: $count($)
+              - 0
+          then: Everything is running normally right now.
+          else:
+            _nunjucks:
+              template: |
+                {{ count }} active incident{% if count != 1 %}s{% endif %}.
+              on:
+                count:
+                  _jsonata:
+                    on:
+                      _state: active_incidents
+                    expr: $count($)
+
+  # Active incidents.
+  - id: active_header
+    type: Title
+    layout:
+      size: 1000
+    properties:
+      content: Active incidents
+      level: 3
+
+  - id: active_empty
+    type: Paragraph
+    visible:
+      _eq:
+        - _jsonata:
+            on:
+              _state: active_incidents
+            expr: $count($)
+        - 0
+    layout:
+      size: 1000
+    properties:
+      type: secondary
+      content: No active incidents.
+
+  # The MasonryList's id must match the state key its children iterate
+  # over. Children use `active_incidents.$.*`, so this list is `active_incidents`.
+  - id: active_incidents
+    type: MasonryList
+    visible:
+      _gt:
+        - _jsonata:
+            on:
+              _state: active_incidents
+            expr: $count($)
+        - 0
+    layout:
+      size: 1000
+    properties:
+      columns:
+        xs: 1
+        md: 2
+      gutter: 16
+    blocks:
+      - id: active_incidents.$.card
+        type: Card
+        layout:
+          # [column-gap, row-gap]: 8px between tags on the same row,
+          # 12px vertical spacing between the tag row, description, timestamp.
+          gap: [ 8, 12 ]
+        properties:
+          hoverable: true
+          title:
+            _state: active_incidents.$.title
+        events:
+          onClick:
+            - id: goto_active_detail
+              type: Link
+              params:
+                pageId: incident
+                urlQuery:
+                  id:
+                    _state: active_incidents.$.id
+        blocks:
+          # Tags shrink to their content (`flex: 0 0 auto`) instead of
+          # claiming the full 24-col row width — that's what makes them
+          # sit next to each other on one line.
+          - id: active_incidents.$.service_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color: blue
+              title:
+                _state: active_incidents.$.service
+          # Look up the tag color from config/severities.yaml. The enum is
+          # an object keyed by value, so `severities.<value>.color` is a
+          # straight path lookup — no jsonata needed, just _get with a
+          # dynamically-built key string.
+          - id: active_incidents.$.severity_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color:
+                _global:
+                  _string.concat:
+                    - severities.
+                    - _state: active_incidents.$.severity
+                    - .color
+              title:
+                _state: active_incidents.$.severity
+          - id: active_incidents.$.status_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color:
+                _global:
+                  _string.concat:
+                    - statuses.
+                    - _state: active_incidents.$.current_status
+                    - .color
+              title:
+                _state: active_incidents.$.current_status
+          - id: active_incidents.$.description
+            type: Paragraph
+            properties:
+              # Clamp to 2 lines so a long description doesn't blow up
+              # the card height.
+              ellipsis:
+                rows: 2
+              content:
+                _state: active_incidents.$.description
+          - id: active_incidents.$.created
+            type: Paragraph
+            properties:
+              type: secondary
+              content:
+                _nunjucks:
+                  template: |
+                    Opened {{ created | date('DD MMM YYYY HH:mm') }}
+                  on:
+                    created:
+                      _state: active_incidents.$.created_at
+
+  # Resolved (last 30 days).
+  - id: resolved_divider
+    type: Divider
+    layout:
+      size: 1000
+
+  - id: resolved_header
+    type: Title
+    layout:
+      size: 1000
+    properties:
+      content: Resolved (last 30 days)
+      level: 3
+
+  - id: resolved_empty
+    type: Paragraph
+    visible:
+      _eq:
+        - _jsonata:
+            on:
+              _state: recent_resolved
+            expr: $count($)
+        - 0
+    layout:
+      size: 1000
+    properties:
+      type: secondary
+      content: Nothing resolved in the last 30 days.
+
+  - id: recent_resolved
+    type: MasonryList
+    visible:
+      _gt:
+        - _jsonata:
+            on:
+              _state: recent_resolved
+            expr: $count($)
+        - 0
+    layout:
+      size: 1000
+    properties:
+      columns:
+        xs: 1
+        md: 2
+      gutter: 16
+    blocks:
+      - id: recent_resolved.$.card
+        type: Card
+        layout:
+          gap: [ 8, 12 ]
+        properties:
+          hoverable: true
+          title:
+            _state: recent_resolved.$.title
+        events:
+          onClick:
+            - id: goto_resolved_detail
+              type: Link
+              params:
+                pageId: incident
+                urlQuery:
+                  id:
+                    _state: recent_resolved.$.id
+        blocks:
+          - id: recent_resolved.$.service_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color: blue
+              title:
+                _state: recent_resolved.$.service
+          - id: recent_resolved.$.severity_tag
+            type: Tag
+            layout:
+              flex: 0 0 auto
+            properties:
+              color:
+                _global:
+                  _string.concat:
+                    - severities.
+                    - _state: recent_resolved.$.severity
+                    - .color
+              title:
+                _state: recent_resolved.$.severity
+          - id: recent_resolved.$.description
+            type: Paragraph
+            properties:
+              ellipsis:
+                rows: 2
+              content:
+                _state: recent_resolved.$.description
+          - id: recent_resolved.$.resolved
+            type: Paragraph
+            properties:
+              type: secondary
+              content:
+                _nunjucks:
+                  template: |
+                    Resolved {{ resolved | date('DD MMM YYYY HH:mm') }}
+                  on:
+                    resolved:
+                      _state: recent_resolved.$.resolved_at
+
+  - id: view_all_link
+    type: Button
+    layout:
+      size: 1000
+    properties:
+      type: link
+      title: View all incidents →
+    events:
+      onClick:
+        - id: goto_incidents
+          type: Link
+          params:
+            pageId: incidents

@@ -1,0 +1,4 @@
+.lowdefy/**
+.env
+*.sqlite
+*.sqlite-journal

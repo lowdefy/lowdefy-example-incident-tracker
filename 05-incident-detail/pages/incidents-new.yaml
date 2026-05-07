@@ -1,0 +1,194 @@
+id: incidents-new
+type: PageHeaderMenu
+
+properties:
+  title: New incident
+
+requests:
+  # Insert the incident row. The id is generated client-side with _uuid
+  # (see the submit button's onClick) and passed through on the payload so
+  # the follow-up update row can reference the same id.
+  - id: insert_incident
+    type: KnexRaw
+    connectionId: incidents_db
+    payload:
+      id:
+        _state: new_incident_id
+      title:
+        _state: title
+      description:
+        _state: description
+      service:
+        _state: service
+      severity:
+        _state: severity
+    properties:
+      query: |
+        INSERT INTO incidents (id, title, description, service, severity, current_status, created_at)
+        VALUES (:id, :title, :description, :service, :severity, 'investigating', datetime('now'))
+      parameters:
+        id:
+          _payload: id
+        title:
+          _payload: title
+        description:
+          _payload: description
+        service:
+          _payload: service
+        severity:
+          _payload: severity
+
+  # Seed the timeline with an "investigating" update so the detail view
+  # has something to show immediately.
+  - id: insert_initial_update
+    type: KnexRaw
+    connectionId: incidents_db
+    payload:
+      update_id:
+        _uuid: true
+      incident_id:
+        _state: new_incident_id
+      description:
+        _state: description
+    properties:
+      query: |
+        INSERT INTO incident_updates (id, incident_id, status, message, created_at)
+        VALUES (:id, :incident_id, 'investigating', :message, datetime('now'))
+      parameters:
+        id:
+          _payload: update_id
+        incident_id:
+          _payload: incident_id
+        message:
+          _payload: description
+
+layout:
+  gap: 24
+  justify: center
+
+blocks:
+  - id: form_card
+    type: Card
+    layout:
+      size: 720
+      gap: 16
+    properties:
+      size: small
+    blocks:
+      - id: page_title
+        type: Title
+        properties:
+          content: New incident
+          level: 2
+
+      - id: help
+        type: Paragraph
+        properties:
+          type: secondary
+          content: |
+            Open a new incident. The incident starts in status "investigating".
+            You can post status updates and mark it resolved from the detail view.
+
+      - id: title
+        type: TextInput
+        required: true
+        properties:
+          label:
+            title: Title
+          placeholder: Short, scannable summary (e.g. "Elevated API latency")
+
+      - id: description
+        type: TextArea
+        required: true
+        properties:
+          label:
+            title: Description
+          placeholder: What is the impact? What do you know so far?
+          rows: 4
+
+      - id: service
+        type: Selector
+        required: true
+        properties:
+          label:
+            title: Affected service
+          placeholder: Pick a service
+          # Project the keyed enum into the [{value, label}, ...] shape
+          # the Selector expects. The slug becomes `value`, the name `label`.
+          options:
+            _jsonata:
+              on:
+                _global: services
+              expr: "$each($, function($v, $k) { { 'value': $k, 'label': $v.name } })"
+
+      - id: severity
+        type: Selector
+        required: true
+        properties:
+          label:
+            title: Severity
+          placeholder: Pick a severity
+          options:
+            _jsonata:
+              on:
+                _global: severities
+              expr: "$each($, function($v, $k) { { 'value': $k, 'label': $v.label } })"
+
+      - id: form_actions
+        type: Box
+        layout:
+          # Cancel sits at the far left, primary action at the far right.
+          justify: space-between
+          gap: 8
+        blocks:
+          - id: cancel_button
+            type: Button
+            layout:
+              flex: 0 0 auto
+            properties:
+              title: Cancel
+            events:
+              onClick:
+                - id: go_home
+                  type: Link
+                  params:
+                    pageId: home
+
+          - id: submit_button
+            type: Button
+            layout:
+              flex: 0 0 auto
+            properties:
+              title: Open incident
+              color: primary
+              variant: solid
+            events:
+              onClick:
+                # Validate required inputs. Validation failures halt the chain.
+                - id: validate
+                  type: Validate
+                # Generate a fresh uuid for the incident and stash it in state
+                # so both inserts and the redirect can use the same id.
+                - id: set_new_id
+                  type: SetState
+                  params:
+                    new_incident_id:
+                      _uuid: true
+                - id: create_incident
+                  type: Request
+                  params: insert_incident
+                - id: create_initial_update
+                  type: Request
+                  params: insert_initial_update
+                - id: flash_success
+                  type: DisplayMessage
+                  params:
+                    type: success
+                    content: Incident opened.
+                - id: goto_detail
+                  type: Link
+                  params:
+                    pageId: incident
+                    urlQuery:
+                      id:
+                        _state: new_incident_id

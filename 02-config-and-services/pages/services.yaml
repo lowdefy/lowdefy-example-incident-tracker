@@ -1,0 +1,83 @@
+id: services
+type: PageHeaderMenu
+
+properties:
+  title: Services
+
+events:
+  # Project the keyed `global.services` object into an array so the
+  # MasonryList can iterate over it (lists always read an array from
+  # state, not an object). Each item carries its own slug as a field.
+  onMount:
+    - id: load_services
+      type: SetState
+      params:
+        services_list:
+          _jsonata:
+            on:
+              _global: services
+            expr: "$each($, function($v, $k) { $merge([$v, { 'slug': $k }]) })"
+
+layout:
+  gap: 24
+  justify: center
+
+blocks:
+  - id: header_card
+    type: Card
+    layout:
+      size: 1000
+      gap: 8
+    properties:
+      size: small
+    blocks:
+      - id: page_title
+        type: Title
+        properties:
+          content: Services
+          level: 2
+      - id: page_subtitle
+        type: Paragraph
+        properties:
+          type: secondary
+          content: |
+            The services tracked by this status page.
+
+  # The MasonryList's id must match the state key its children iterate
+  # over. Children use `services_list.$.*`, so this list is `services_list`.
+  - id: services_list
+    type: MasonryList
+    layout:
+      size: 1000
+    properties:
+      columns:
+        xs: 1
+        sm: 2
+        lg: 3
+      gutter: 16
+    blocks:
+      - id: services_list.$.card
+        type: Card
+        properties:
+          size: small
+          title:
+            _state: services_list.$.name
+        slots:
+          # `extra` is the top-right corner of the card header. Putting
+          # the slug tag here keeps the card body clean — just description.
+          extra:
+            blocks:
+              - id: services_list.$.slug_tag
+                type: Tag
+                layout:
+                  flex: 0 0 auto
+                properties:
+                  color: blue
+                  title:
+                    _state: services_list.$.slug
+        blocks:
+          - id: services_list.$.description
+            type: Paragraph
+            properties:
+              content:
+                _state: services_list.$.description

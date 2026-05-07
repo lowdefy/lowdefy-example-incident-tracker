@@ -1,0 +1,29 @@
+lowdefy: 5.2.0
+name: Incident Tracker
+
+config:
+  homePageId: services
+
+global:
+  # App config, not data — exposed app-wide via the _global operator.
+  # Edit the files in config/ to change what the tracker covers and how
+  # severities and statuses are labelled and coloured.
+  services:
+    _ref: config/services.yaml
+  severities:
+    _ref: config/severities.yaml
+  statuses:
+    _ref: config/statuses.yaml
+
+menus:
+  - id: default
+    links:
+      - id: services_link
+        type: MenuLink
+        pageId: services
+        properties:
+          icon: AiOutlineAppstore
+          title: Services
+
+pages:
+  - _ref: pages/services.yaml
